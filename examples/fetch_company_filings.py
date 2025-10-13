@@ -13,7 +13,7 @@ from sec_filings import SECClient
 def main():
     # Initialize client with your contact information
     # SEC requires this - replace with your actual info
-    client = SECClient(user_agent="Your Name your.email@example.com")
+    client = SECClient(user_agent="Thomas Gardos tgardos@bu.edu")
 
     # Get CIK for a company (e.g., Apple)
     ticker = "AAPL"
