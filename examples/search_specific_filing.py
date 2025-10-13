@@ -12,7 +12,7 @@ from pathlib import Path
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings import SECClient, UniversityAffiliationFinder
+from sec_filings import SECClient, UniversityAffiliationFinder, load_user_agent_from_env
 
 
 def main():
@@ -27,7 +27,8 @@ def main():
     filing_type = sys.argv[2] if len(sys.argv) > 2 else "DEF 14A"
 
     # Initialize
-    client = SECClient(user_agent="Thomas Gardos tgardos@bu.edu")
+    user_agent = load_user_agent_from_env()
+    client = SECClient(user_agent=user_agent)
     finder = UniversityAffiliationFinder()
 
     print(f"Searching for Boston University affiliations in {ticker} {filing_type} filings...\n")

@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings import SECClient
+from sec_filings import SECClient, load_user_agent_from_env
 
 
 def extract_10k_sections(html_content: str) -> dict:
@@ -48,7 +48,8 @@ def extract_10k_sections(html_content: str) -> dict:
 
 def main():
     # Initialize client
-    client = SECClient(user_agent="Your Name your.email@example.com")
+    user_agent = load_user_agent_from_env()
+    client = SECClient(user_agent=user_agent)
 
     # Get a 10-K filing
     ticker = "AAPL"

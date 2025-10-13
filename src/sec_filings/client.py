@@ -166,8 +166,21 @@ class SECClient:
                 continue
 
             # Extract accession number from URL
-            # URL format: /cgi-bin/viewer?action=view&cik=...&accession_number=...
-            accession_number = doc_url.split("accession_number=")[-1].split("&")[0] if "accession_number=" in doc_url else ""
+            # URL format can be either:
+            # - /cgi-bin/viewer?action=view&cik=...&accession_number=...
+            # - /Archives/edgar/data/CIK/ACCESSION/ACCESSION-index.htm
+            accession_number = ""
+            if "accession_number=" in doc_url:
+                accession_number = doc_url.split("accession_number=")[-1].split("&")[0]
+            else:
+                # Extract from path format: /Archives/edgar/data/320193/000119312522003583/0001193125-22-003583-index.htm
+                # The accession number is the last path component before -index.htm
+                parts = doc_url.rstrip("/").split("/")
+                if len(parts) >= 2:
+                    # Get the filename and remove -index.htm suffix
+                    filename = parts[-1]
+                    if filename.endswith("-index.htm"):
+                        accession_number = filename.replace("-index.htm", "")
 
             filings.append({
                 "type": filing_type_col,
@@ -178,11 +191,12 @@ class SECClient:
 
         return filings
 
-    def download_filing(self, accession_number: str, save_path: Optional[str] = None) -> str:
+    def download_filing(self, accession_number: str, cik: Optional[str] = None, save_path: Optional[str] = None) -> str:
         """Download a filing document.
 
         Args:
             accession_number: Filing accession number (e.g., "0000320193-23-000077")
+            cik: Company CIK (optional, will be extracted from accession number if not provided)
             save_path: Optional path to save the filing. If None, returns content as string.
 
         Returns:
@@ -191,17 +205,65 @@ class SECClient:
         Raises:
             FilingNotFoundError: If filing is not found
         """
-        # Remove dashes from accession number for URL
+        # Remove dashes from accession number for directory path
         acc_no_dashes = accession_number.replace("-", "")
 
-        # Construct the filing URL
-        url = f"{self.BASE_URL}/cgi-bin/viewer?action=view&cik=0&accession_number={accession_number}"
+        # Extract CIK from accession number if not provided
+        # Accession format: XXXXXXXXXX-YY-ZZZZZZ where first part is filer CIK
+        if not cik:
+            cik = accession_number.split("-")[0]
 
-        response = self._make_request(url)
+        # Remove leading zeros from CIK for the URL path
+        cik_no_zeros = cik.lstrip("0")
 
-        if response.status_code == 404:
+        # Construct the filing index URL
+        # Format: https://www.sec.gov/Archives/edgar/data/CIK/ACCESSION/ACCESSION-index.htm
+        index_url = f"{self.BASE_URL}/Archives/edgar/data/{cik_no_zeros}/{acc_no_dashes}/{accession_number}-index.htm"
+
+        try:
+            index_response = self._make_request(index_url)
+        except SECAPIError:
             raise FilingNotFoundError(f"Filing {accession_number} not found")
 
+        # Parse the index page to find the primary document
+        soup = BeautifulSoup(index_response.text, "lxml")
+        table = soup.find("table", class_="tableFile")
+
+        if not table:
+            raise FilingNotFoundError(f"Could not find document table for filing {accession_number}")
+
+        # Find the first HTML document (usually the main filing)
+        rows = table.find_all("tr")[1:]  # Skip header
+        doc_url = None
+
+        for row in rows:
+            cells = row.find_all("td")
+            if len(cells) >= 3:
+                link = cells[2].find("a")
+                if link:
+                    href = link.get("href", "")
+                    # Look for HTML or HTM files (not graphics, PDFs, etc.)
+                    if href and (".htm" in href.lower() or ".html" in href.lower()) and ".jpg" not in href.lower():
+                        doc_url = href
+                        break
+
+        if not doc_url:
+            raise FilingNotFoundError(f"Could not find primary document for filing {accession_number}")
+
+        # Handle inline XBRL viewer URLs (format: /ix?doc=/Archives/...)
+        # Extract the actual document URL from the doc parameter
+        if "/ix?" in doc_url and "doc=" in doc_url:
+            import urllib.parse
+            parsed = urllib.parse.urlparse(doc_url)
+            params = urllib.parse.parse_qs(parsed.query)
+            if "doc" in params:
+                doc_url = params["doc"][0]
+
+        # Download the actual filing document
+        if doc_url.startswith("/"):
+            doc_url = f"{self.BASE_URL}{doc_url}"
+
+        response = self._make_request(doc_url)
         content = response.text
 
         if save_path:

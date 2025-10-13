@@ -13,7 +13,7 @@ from typing import List
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings import SECClient, UniversityAffiliationFinder, AffiliationMatch
+from sec_filings import SECClient, UniversityAffiliationFinder, AffiliationMatch, load_user_agent_from_env
 
 
 def search_company_filings(
@@ -125,7 +125,8 @@ def save_results_to_csv(matches: List[AffiliationMatch], output_path: Path):
 
 def main():
     # Initialize client and finder
-    client = SECClient(user_agent="Thomas Gardos tgardos@bu.edu")
+    user_agent = load_user_agent_from_env()
+    client = SECClient(user_agent=user_agent)
     finder = UniversityAffiliationFinder()  # Defaults to Boston University
 
     # Companies to search (modify this list as needed)

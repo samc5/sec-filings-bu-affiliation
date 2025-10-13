@@ -9,6 +9,22 @@ class FilingParser:
     """Parser for extracting structured information from SEC filings."""
 
     @staticmethod
+    def _detect_parser(content: str) -> str:
+        """Detect whether content is XML or HTML.
+
+        Args:
+            content: File content
+
+        Returns:
+            Parser name: "xml" or "lxml" (HTML)
+        """
+        # Check if content starts with XML declaration or has XML-like structure
+        stripped = content.strip()
+        if stripped.startswith('<?xml') or stripped.startswith('<XML>'):
+            return "xml"
+        return "lxml"
+
+    @staticmethod
     def extract_text_from_html(html_content: str) -> str:
         """Extract clean text from HTML filing.
 
@@ -18,7 +34,8 @@ class FilingParser:
         Returns:
             Clean text with minimal whitespace
         """
-        soup = BeautifulSoup(html_content, "lxml")
+        parser = FilingParser._detect_parser(html_content)
+        soup = BeautifulSoup(html_content, parser)
 
         # Remove script and style elements
         for script in soup(["script", "style"]):
@@ -48,7 +65,8 @@ class FilingParser:
         Returns:
             List of dictionaries with 'section_name' and 'content'
         """
-        soup = BeautifulSoup(html_content, "lxml")
+        parser = FilingParser._detect_parser(html_content)
+        soup = BeautifulSoup(html_content, parser)
         text = soup.get_text()
 
         sections = []
@@ -111,14 +129,43 @@ class FilingParser:
         """
         bios = []
 
-        # Pattern to find names (often in bold/caps at start of paragraph)
-        # Looks for: Name, age XX, or Name (age XX) or just capitalized name patterns
-        name_pattern = r"(?:^|\n\s*)([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[,\s]+(?:age\s+)?(\d{2})"
+        # Common organization names/keywords to exclude (not people)
+        organization_keywords = [
+            "stock exchange", "securities", "commission", "corporation",
+            "company", "inc.", "llc", "ltd", "limited", "incorporated",
+            "new york", "nasdaq", "exchange", "federal", "department",
+            "united states", "internal revenue", "financial accounting",
+            "table of contents", "form 10", "part i"
+        ]
 
-        matches = list(re.finditer(name_pattern, bio_section_text, re.MULTILINE))
+        def is_likely_person_name(name: str) -> bool:
+            """Check if name is likely a person (not an organization)."""
+            name_lower = name.lower()
+            # Check for organization keywords
+            for keyword in organization_keywords:
+                if keyword in name_lower:
+                    return False
+            # Reject if all caps (likely section header)
+            if name.isupper():
+                return False
+            # Reject if contains multiple consecutive capitals (NYSE, SEC, etc.)
+            if re.search(r"[A-Z]{3,}", name):
+                return False
+            return True
+
+        # Try multiple patterns to find name+age combinations
+        # Pattern 1: Name, age XX or Name (age XX) - most specific
+        pattern_with_age = r"(?:^|\n\s*)([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[,\s]+(?:age\s+)?(\d{2})"
+
+        matches = list(re.finditer(pattern_with_age, bio_section_text, re.MULTILINE))
 
         for i, match in enumerate(matches):
             name = match.group(1).strip()
+
+            # Skip if not a person name
+            if not is_likely_person_name(name):
+                continue
+
             age = match.group(2)
             start = match.start()
 
@@ -136,19 +183,56 @@ class FilingParser:
                 "bio": bio_text
             })
 
-        # If no structured bios found, try simpler paragraph-based extraction
+        # If no age-based matches, try to find names at paragraph starts
+        # Pattern 2: Name followed by title or role (Mr., Ms., Dr., CEO, President, Director, etc.)
+        if not bios:
+            # Look for names followed by common titles or roles
+            name_title_pattern = r"(?:^|\n\s*)([A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)[,\s]+(?:Mr\.|Ms\.|Mrs\.|Dr\.|Director|President|CEO|CFO|COO|Chief|Vice|Trustee|has\s+served|is\s+a|serves)"
+
+            matches = list(re.finditer(name_title_pattern, bio_section_text, re.MULTILINE | re.IGNORECASE))
+
+            for i, match in enumerate(matches):
+                name = match.group(1).strip()
+
+                # Skip if not a person name
+                if not is_likely_person_name(name):
+                    continue
+
+                start = match.start()
+
+                # Find end of this bio
+                if i + 1 < len(matches):
+                    end = matches[i + 1].start()
+                else:
+                    end = min(start + 2000, len(bio_section_text))
+
+                bio_text = bio_section_text[start:end].strip()
+
+                # Only add if substantial
+                if len(bio_text) > 100:
+                    bios.append({
+                        "name": name,
+                        "age": "Unknown",
+                        "bio": bio_text
+                    })
+
+        # If still no matches, try simpler paragraph-based extraction
         if not bios:
             paragraphs = bio_section_text.split("\n\n")
             for para in paragraphs:
                 if len(para) > 100:  # Substantial paragraph
-                    # Try to extract a name from the start
+                    # Try to extract a name from the start (First Middle? Last format)
                     first_line = para.split("\n")[0]
-                    name_match = re.search(r"([A-Z][a-z]+\s+[A-Z]\.?\s+[A-Z][a-z]+)", first_line)
+                    # More flexible name pattern
+                    name_match = re.search(r"([A-Z][a-z]+(?:\s+[A-Z]\.?)?(?:\s+[A-Z][a-z]+)+)", first_line)
                     if name_match:
-                        bios.append({
-                            "name": name_match.group(1),
-                            "age": "Unknown",
-                            "bio": para[:1000]
-                        })
+                        name = name_match.group(1)
+                        # Skip if not a person name
+                        if is_likely_person_name(name):
+                            bios.append({
+                                "name": name,
+                                "age": "Unknown",
+                                "bio": para[:1000]
+                            })
 
         return bios

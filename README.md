@@ -11,7 +11,16 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Configure SEC API access (REQUIRED)
+# Copy the example .env file and add your contact information
+cp .env.example .env
+# Edit .env and set:
+#   SEC_USER_NAME=Your Name
+#   SEC_USER_EMAIL=your.email@example.com
 ```
+
+**Important:** The SEC requires that all API requests include contact information in the User-Agent header. The scripts will not run without a properly configured `.env` file with your name and email.
 
 ## Quick Start
 
@@ -43,10 +52,10 @@ Results are saved to `data/bu_affiliations_YYYY-MM-DD.csv`.
 ### Basic API Usage
 
 ```python
-from sec_filings import SECClient, UniversityAffiliationFinder
+from sec_filings import SECClient, UniversityAffiliationFinder, load_user_agent_from_env
 
-# Initialize client with your contact info (required by SEC)
-client = SECClient(user_agent="Your Name your.email@example.com")
+# Initialize client (loads contact info from .env file)
+client = SECClient(user_agent=load_user_agent_from_env())
 
 # Get company CIK (Central Index Key)
 cik = client.get_cik("AAPL")

@@ -20,10 +20,9 @@ class AffiliationMatch:
 class UniversityAffiliationFinder:
     """Find mentions of university affiliations in biographical text."""
 
-    # Boston University variations and common abbreviations
+    # Boston University variations - full names only to avoid false positives
     BU_PATTERNS = [
         r"Boston\s+University",
-        r"\bBU\b",
         r"Boston\s+U\.",
     ]
 
@@ -76,7 +75,7 @@ class UniversityAffiliationFinder:
 
         # Create regex pattern combining university and context
         for uni_pattern in self.university_patterns:
-            # Find all mentions of the university
+            # Find all mentions of the university (case-insensitive)
             for uni_match in re.finditer(uni_pattern, text, re.IGNORECASE):
                 # Extract context around the mention (±200 chars)
                 start = max(0, uni_match.start() - 200)

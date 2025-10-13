@@ -7,13 +7,13 @@ from pathlib import Path
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings import SECClient
+from sec_filings import SECClient, load_user_agent_from_env
 
 
 def main():
     # Initialize client with your contact information
-    # SEC requires this - replace with your actual info
-    client = SECClient(user_agent="Thomas Gardos tgardos@bu.edu")
+    user_agent = load_user_agent_from_env()
+    client = SECClient(user_agent=user_agent)
 
     # Get CIK for a company (e.g., Apple)
     ticker = "AAPL"

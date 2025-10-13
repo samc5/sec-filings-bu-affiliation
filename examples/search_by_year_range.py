@@ -18,7 +18,7 @@ from datetime import datetime
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings import SECClient, UniversityAffiliationFinder, AffiliationMatch
+from sec_filings import SECClient, UniversityAffiliationFinder, AffiliationMatch, load_user_agent_from_env
 
 
 def search_filings_with_progress(
@@ -187,7 +187,7 @@ def main():
     if args.output:
         output_path = Path(args.output)
     else:
-        timestamp = datetime.now().strftime("%Y-%m-%d")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         output_path = Path(__file__).parent.parent / "data" / f"bu_affiliations_{timestamp}.csv"
 
     output_path.parent.mkdir(exist_ok=True)
@@ -204,7 +204,8 @@ def main():
     print("="*80)
 
     # Initialize client and finder
-    client = SECClient(user_agent="Thomas Gardos tgardos@bu.edu")
+    user_agent = load_user_agent_from_env()
+    client = SECClient(user_agent=user_agent)
     finder = UniversityAffiliationFinder()
 
     # Convert years to date strings
