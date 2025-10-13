@@ -43,6 +43,8 @@ mypy src/
   - Handles rate limiting (10 requests/second SEC limit)
   - Automatic User-Agent header management
   - Methods: `get_cik()`, `get_filings()`, `download_filing()`
+  - New: `get_company_tickers_list()`: Fetch all ~13,000 companies from SEC index
+  - New: `get_recent_filings_bulk()`: Search filings across all companies by date range
 
 - `src/sec_filings/parser.py`: Filing content parser
   - `FilingParser.extract_text_from_html()`: Clean HTML to text
@@ -84,12 +86,29 @@ See `examples/fetch_company_filings.py` for basic fetching workflow:
 
 ### Finding University Affiliations
 
-**Search multiple companies** (`examples/find_bu_affiliations.py`):
+**RECOMMENDED: Search by year range** (`examples/search_by_year_range.py`):
+```bash
+# Search all companies that filed between 2020-2024
+python examples/search_by_year_range.py --start-year 2020 --end-year 2024
+
+# Test mode (only first 50 companies)
+python examples/search_by_year_range.py --start-year 2023 --end-year 2024 --test-mode
+
+# Customize filing types and max filings per company
+python examples/search_by_year_range.py --start-year 2023 --end-year 2024 --filing-types "DEF 14A,10-K" --max-per-company 2
+```
+- Fetches complete SEC company index (~13,000 companies)
+- Gets recent filings for each company in date range
+- Searches biographical sections for BU mentions
+- Saves results to `data/bu_affiliations_YYYY-MM-DD.csv`
+- Uses progress tracking and periodic saves
+- Can take 30+ minutes for comprehensive searches
+
+**Search specific companies** (`examples/find_bu_affiliations.py`):
 ```bash
 python examples/find_bu_affiliations.py
 ```
 - Searches proxy statements (DEF 14A) and 10-Ks for BU affiliations
-- Outputs CSV file with all matches to `data/bu_affiliations.csv`
 - Edit the `tickers` list in the script to customize which companies to search
 
 **Search single company** (`examples/search_specific_filing.py`):

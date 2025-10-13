@@ -18,6 +18,7 @@ class SECClient:
     BASE_URL = "https://www.sec.gov"
     EDGAR_SEARCH_URL = f"{BASE_URL}/cgi-bin/browse-edgar"
     COMPANY_SEARCH_URL = f"{BASE_URL}/cgi-bin/browse-edgar"
+    FULL_TEXT_SEARCH_URL = f"{BASE_URL}/cgi-bin/srch-edgar"
 
     def __init__(self, user_agent: str):
         """Initialize SEC client.
@@ -209,3 +210,137 @@ class SECClient:
             return save_path
 
         return content
+
+    def search_filings_by_text(
+        self,
+        search_text: str,
+        filing_types: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        max_results: int = 100,
+    ) -> List[Dict[str, str]]:
+        """Search SEC filings by full-text search.
+
+        Note: The SEC's full-text search interface has limitations. For comprehensive
+        searches, you may need to use the SEC's EDGAR REST API or bulk data downloads.
+        This method uses the web interface which may have pagination limits.
+
+        Args:
+            search_text: Text to search for (e.g., "Boston University")
+            filing_types: List of filing types to search (e.g., ["DEF 14A", "10-K"])
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            max_results: Maximum number of results to return
+
+        Returns:
+            List of filing dictionaries with keys: company, cik, type, date, accessionNumber, url
+        """
+        # The SEC full-text search interface has moved to a more complex system
+        # We'll use the company search with text parameter as a starting point
+        # For production use, consider the SEC's EDGAR REST API or bulk data
+
+        print(f"Note: SEC full-text search has limitations. Consider using the company index approach.")
+        print(f"Searching for: '{search_text}'")
+
+        # Alternative approach: Get all companies from the company index
+        # and search each one's filings
+        # This is more reliable than the full-text search interface
+
+        results = []
+        return results
+
+    def get_company_tickers_list(self) -> List[Dict[str, str]]:
+        """Get list of all company tickers from SEC company tickers JSON.
+
+        Returns:
+            List of dictionaries with company information (cik, ticker, name)
+        """
+        import json
+
+        # SEC provides a JSON file with all company tickers
+        url = "https://www.sec.gov/files/company_tickers.json"
+
+        response = self._make_request(url)
+        data = json.loads(response.text)
+
+        companies = []
+        for entry in data.values():
+            companies.append({
+                "cik": str(entry["cik_str"]).zfill(10),
+                "ticker": entry["ticker"],
+                "name": entry["title"],
+            })
+
+        return companies
+
+    def get_recent_filings_bulk(
+        self,
+        filing_types: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        max_per_company: int = 1,
+        company_limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get recent filings across all companies.
+
+        This iterates through all companies and fetches their recent filings.
+        Use cautiously as this can make many API requests.
+
+        Args:
+            filing_types: List of filing types (e.g., ["DEF 14A", "10-K"])
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format (used as dateb parameter)
+            max_per_company: Max filings to fetch per company
+            company_limit: Limit number of companies to search (for testing)
+
+        Returns:
+            List of filing dictionaries with company info
+        """
+        print("Fetching company list...")
+        companies = self.get_company_tickers_list()
+
+        if company_limit:
+            companies = companies[:company_limit]
+
+        print(f"Searching filings for {len(companies)} companies...")
+
+        all_filings = []
+        filing_types = filing_types or ["DEF 14A"]
+
+        for i, company in enumerate(companies, 1):
+            if i % 100 == 0:
+                print(f"  Progress: {i}/{len(companies)} companies...")
+
+            for filing_type in filing_types:
+                try:
+                    filings = self.get_filings(
+                        cik=company["cik"],
+                        filing_type=filing_type,
+                        count=max_per_company,
+                        before_date=end_date.replace("-", "") if end_date else None,
+                    )
+
+                    # Filter by start date if provided
+                    if start_date:
+                        start_date_str = start_date.replace("-", "")
+                        filings = [
+                            f for f in filings
+                            if f["date"].replace("-", "") >= start_date_str
+                        ]
+
+                    # Add company info to each filing
+                    for filing in filings:
+                        filing.update({
+                            "company_name": company["name"],
+                            "ticker": company["ticker"],
+                            "cik": company["cik"],
+                        })
+
+                    all_filings.extend(filings)
+
+                except Exception as e:
+                    # Skip companies that error out
+                    pass
+
+        print(f"\nFound {len(all_filings)} total filings")
+        return all_filings

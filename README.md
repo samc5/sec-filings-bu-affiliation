@@ -17,17 +17,28 @@ pip install -r requirements.txt
 
 ### Finding Boston University Affiliations
 
-Search multiple companies for BU affiliations:
+**Recommended: Search by year range** (searches all companies):
 ```bash
-python examples/find_bu_affiliations.py
+# Search all filings from 2020-2024
+python examples/search_by_year_range.py --start-year 2020 --end-year 2024
+
+# Test mode (searches only first 50 companies)
+python examples/search_by_year_range.py --start-year 2023 --end-year 2024 --test-mode
+
+# Customize filing types
+python examples/search_by_year_range.py --start-year 2023 --end-year 2024 --filing-types "DEF 14A,10-K,S-1"
 ```
 
-Search a specific company:
+**Search specific companies:**
 ```bash
+# Search multiple predefined companies
+python examples/find_bu_affiliations.py
+
+# Search a single company's latest filing
 python examples/search_specific_filing.py AAPL DEF14A
 ```
 
-Results are saved to `data/bu_affiliations.csv`.
+Results are saved to `data/bu_affiliations_YYYY-MM-DD.csv`.
 
 ### Basic API Usage
 
@@ -55,12 +66,29 @@ for match in matches:
 ## Examples
 
 **University Affiliation Search:**
-- `find_bu_affiliations.py`: Search multiple companies for BU affiliations
+- `search_by_year_range.py`: **[RECOMMENDED]** Search all SEC filings by year range for BU affiliations
+- `find_bu_affiliations.py`: Search specific list of companies for BU affiliations
 - `search_specific_filing.py`: Search a single company's latest filing
 
 **Basic Filing Operations:**
 - `fetch_company_filings.py`: Download filings for a specific company
 - `parse_10k.py`: Extract sections from 10-K filings
+
+## Search Approaches
+
+### Year Range Search (Recommended)
+The `search_by_year_range.py` script searches **all companies** that filed during a time period:
+- Fetches the complete SEC company index (~13,000 companies)
+- Gets recent filings for each company in the date range
+- Searches each filing for Boston University mentions
+- Can take 30+ minutes for comprehensive searches
+- Best for finding all BU affiliations across the entire market
+
+### Company List Search
+The `find_bu_affiliations.py` script searches a **predefined list** of companies:
+- Faster than year range search
+- Useful when you know which companies to target
+- Edit the `tickers` list in the script to customize
 
 ## Features
 
