@@ -78,8 +78,9 @@ def search_filings_with_progress(
 
         except Exception as e:
             errors += 1
-            if errors % 10 == 0:
-                print(f"  ✗ [{i}/{len(filings)}] Error count: {errors} (last: {str(e)[:50]})")
+            # Always print error details (not just every 10th)
+            print(f"  ✗ [{i}/{len(filings)}] Error processing {filing.get('company_name', 'Unknown')} "
+                  f"({filing.get('ticker', '')}): {str(e)[:80]}")
 
     print(f"\n{'='*80}")
     print(f"Search complete!")
