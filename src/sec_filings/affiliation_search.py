@@ -49,13 +49,29 @@ class UniversityAffiliationFinder:
         r"provost",
     ]
 
-    def __init__(self, university_patterns: Optional[List[str]] = None):
+    def __init__(
+        self,
+        university_patterns: Optional[List[str]] = None,
+        use_nlp: bool = True
+    ):
         """Initialize affiliation finder.
 
         Args:
             university_patterns: Custom university name patterns. Defaults to Boston University.
+            use_nlp: Whether to use NLP-based extraction if available (default: True)
         """
         self.university_patterns = university_patterns or self.BU_PATTERNS
+        self.use_nlp = use_nlp
+
+        # Try to initialize BiographyExtractor if NLP is requested
+        self.nlp_extractor = None
+        if use_nlp:
+            try:
+                from .biography_extractor import BiographyExtractor, is_spacy_available
+                if is_spacy_available():
+                    self.nlp_extractor = BiographyExtractor()
+            except ImportError:
+                pass  # Fall back to pattern-based
 
     def find_affiliations_in_text(
         self,
@@ -131,16 +147,71 @@ class UniversityAffiliationFinder:
         # If university mentioned but no clear context
         return ("mention", "low")
 
+    def find_affiliations_nlp(
+        self,
+        text: str,
+        organization_names: Optional[List[str]] = None,
+        context_window: int = 500
+    ) -> List[AffiliationMatch]:
+        """Find affiliations using NLP-based extraction.
+
+        This method uses SpaCy NER if available, otherwise falls back to
+        pattern-based extraction.
+
+        Args:
+            text: Text to search
+            organization_names: List of organization name variations
+            context_window: Context window size for extraction
+
+        Returns:
+            List of AffiliationMatch objects
+        """
+        if self.nlp_extractor is None:
+            # Fall back to pattern-based
+            return self.find_affiliations_in_text(text)
+
+        # Use organization names if provided, otherwise use configured patterns
+        if organization_names is None:
+            # Convert regex patterns to plain strings for NLP extractor
+            organization_names = []
+            for pattern in self.university_patterns:
+                # Remove regex escapes and convert to plain text
+                name = pattern.replace(r"\s+", " ").replace(r"\.", ".")
+                organization_names.append(name)
+
+        # Extract affiliations using NLP
+        from .biography_extractor import PersonAffiliation
+        nlp_affiliations = self.nlp_extractor.extract_affiliations(
+            text,
+            organization_names=organization_names,
+            context_window=context_window
+        )
+
+        # Convert PersonAffiliation objects to AffiliationMatch objects
+        matches = []
+        for aff in nlp_affiliations:
+            matches.append(AffiliationMatch(
+                person_name=aff.person_name,
+                affiliation_type=aff.affiliation_type,
+                context=aff.context,
+                confidence=aff.confidence,
+                filing_info=None
+            ))
+
+        return matches
+
     def search_filing(
         self,
         html_content: str,
-        filing_metadata: Optional[Dict[str, str]] = None
+        filing_metadata: Optional[Dict[str, str]] = None,
+        use_enhanced_parser: bool = True
     ) -> List[AffiliationMatch]:
         """Search an entire SEC filing for university affiliations.
 
         Args:
             html_content: Raw HTML content of filing
             filing_metadata: Optional metadata about the filing (ticker, date, type, etc.)
+            use_enhanced_parser: Whether to use enhanced parser (default: True)
 
         Returns:
             List of all affiliation matches found
@@ -148,29 +219,41 @@ class UniversityAffiliationFinder:
         parser = FilingParser()
         all_matches = []
 
-        # Find biographical sections
-        bio_sections = parser.find_biographical_sections(html_content)
+        # Use enhanced parser if requested and NLP is available
+        if use_enhanced_parser and self.nlp_extractor is not None:
+            bio_sections = parser.find_biographical_sections_enhanced(html_content)
+        else:
+            bio_sections = parser.find_biographical_sections(html_content)
 
         for section in bio_sections:
-            # Extract individual biographies
-            individual_bios = parser.extract_individual_bios(section["content"])
-
-            if individual_bios:
-                # Search each individual bio
-                for bio in individual_bios:
-                    matches = self.find_affiliations_in_text(
-                        bio["bio"],
-                        person_name=bio["name"]
-                    )
-                    for match in matches:
-                        match.filing_info = filing_metadata
-                    all_matches.extend(matches)
-            else:
-                # No individual bios found, search entire section
-                matches = self.find_affiliations_in_text(section["content"])
+            # Use NLP-based extraction if available
+            if self.nlp_extractor is not None:
+                # Use NLP to find affiliations directly
+                matches = self.find_affiliations_nlp(section["content"])
                 for match in matches:
                     match.filing_info = filing_metadata
                 all_matches.extend(matches)
+            else:
+                # Fall back to pattern-based extraction
+                # Extract individual biographies
+                individual_bios = parser.extract_individual_bios(section["content"])
+
+                if individual_bios:
+                    # Search each individual bio
+                    for bio in individual_bios:
+                        matches = self.find_affiliations_in_text(
+                            bio["bio"],
+                            person_name=bio["name"]
+                        )
+                        for match in matches:
+                            match.filing_info = filing_metadata
+                        all_matches.extend(matches)
+                else:
+                    # No individual bios found, search entire section
+                    matches = self.find_affiliations_in_text(section["content"])
+                    for match in matches:
+                        match.filing_info = filing_metadata
+                    all_matches.extend(matches)
 
         return all_matches
 
