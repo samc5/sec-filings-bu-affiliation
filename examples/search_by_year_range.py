@@ -18,7 +18,21 @@ from datetime import datetime
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings import SECClient, UniversityAffiliationFinder, AffiliationMatch, load_user_agent_from_env
+from sec_filings import (
+    SECClient,
+    UniversityAffiliationFinder,
+    AffiliationMatch,
+    load_user_agent_from_env,
+    is_spacy_available
+)
+
+# Try to import tqdm for progress bars
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    print("Note: Install tqdm for progress bars: pip install tqdm")
 
 
 def search_filings_with_progress(
@@ -28,6 +42,7 @@ def search_filings_with_progress(
     batch_size: int = 50,
     save_interval: int = 100,
     output_path: Path = None,
+    use_progress_bar: bool = True,
 ) -> list:
     """Search filings for BU affiliations with progress tracking and periodic saves.
 
@@ -38,6 +53,7 @@ def search_filings_with_progress(
         batch_size: Number of filings to process before showing progress
         save_interval: Number of matches before saving to disk
         output_path: Path to save results
+        use_progress_bar: Whether to use tqdm progress bar (default: True)
 
     Returns:
         List of all affiliation matches found
@@ -47,9 +63,15 @@ def search_filings_with_progress(
     errors = 0
 
     print(f"\nSearching {len(filings)} filings for Boston University affiliations...")
-    print(f"This may take a while. Progress will be shown every {batch_size} filings.\n")
 
-    for i, filing in enumerate(filings, 1):
+    # Use tqdm progress bar if available and requested
+    if TQDM_AVAILABLE and use_progress_bar:
+        filings_iter = tqdm(filings, desc="Processing filings", unit="filing")
+    else:
+        filings_iter = filings
+        print(f"Progress will be shown every {batch_size} filings.\n")
+
+    for i, filing in enumerate(filings_iter, 1):
         try:
             # Download filing
             content = client.download_filing(filing["accessionNumber"])
@@ -58,19 +80,26 @@ def search_filings_with_progress(
             matches = finder.search_filing(content, filing_metadata=filing)
 
             if matches:
-                print(f"  ✓ [{i}/{len(filings)}] {filing['company_name']} ({filing['ticker']}) "
-                      f"{filing['type']} {filing['date']}: Found {len(matches)} match(es)!")
+                match_msg = f"✓ {filing['company_name']} ({filing['ticker']}) {filing['type']} {filing['date']}: Found {len(matches)} match(es)!"
+                if TQDM_AVAILABLE and use_progress_bar:
+                    tqdm.write(f"  {match_msg}")
+                else:
+                    print(f"  [{i}/{len(filings)}] {match_msg}")
                 all_matches.extend(matches)
 
                 # Save periodically
                 if output_path and len(all_matches) % save_interval == 0:
                     save_results_to_csv(all_matches, output_path)
-                    print(f"    → Saved {len(all_matches)} matches to disk")
+                    save_msg = f"→ Saved {len(all_matches)} matches to disk"
+                    if TQDM_AVAILABLE and use_progress_bar:
+                        tqdm.write(f"    {save_msg}")
+                    else:
+                        print(f"    {save_msg}")
 
             processed += 1
 
-            # Show periodic progress
-            if i % batch_size == 0:
+            # Show periodic progress (only if not using progress bar)
+            if not (TQDM_AVAILABLE and use_progress_bar) and i % batch_size == 0:
                 print(f"\nProgress: {i}/{len(filings)} filings processed "
                       f"({100*i/len(filings):.1f}%)")
                 print(f"  Matches found: {len(all_matches)}")
@@ -78,9 +107,12 @@ def search_filings_with_progress(
 
         except Exception as e:
             errors += 1
-            # Always print error details (not just every 10th)
-            print(f"  ✗ [{i}/{len(filings)}] Error processing {filing.get('company_name', 'Unknown')} "
-                  f"({filing.get('ticker', '')}): {str(e)[:80]}")
+            # Always print error details
+            error_msg = f"✗ Error processing {filing.get('company_name', 'Unknown')} ({filing.get('ticker', '')}): {str(e)[:80]}"
+            if TQDM_AVAILABLE and use_progress_bar:
+                tqdm.write(f"  {error_msg}")
+            else:
+                print(f"  [{i}/{len(filings)}] {error_msg}")
 
     print(f"\n{'='*80}")
     print(f"Search complete!")
@@ -169,6 +201,21 @@ def main():
         default=None,
         help="Output CSV file path (default: data/bu_affiliations_YYYY-MM-DD.csv)"
     )
+    parser.add_argument(
+        "--use-nlp",
+        action="store_true",
+        help="Use NLP-based extraction with SpaCy (more accurate, requires SpaCy installation)"
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable filing cache (downloads will not be cached)"
+    )
+    parser.add_argument(
+        "--no-progress-bar",
+        action="store_true",
+        help="Disable tqdm progress bar"
+    )
 
     args = parser.parse_args()
 
@@ -196,18 +243,41 @@ def main():
     print("="*80)
     print("SEC Filings Search by Year Range")
     print("="*80)
+
+    # Check NLP availability
+    nlp_available = is_spacy_available()
+    use_nlp = args.use_nlp and nlp_available
+
+    if args.use_nlp and not nlp_available:
+        print("WARNING: --use-nlp requested but SpaCy not available!")
+        print("Install with: pip install spacy")
+        print("Then: python -m spacy download en_core_web_sm")
+        print("Falling back to pattern-based extraction.\n")
+
     print(f"Search Parameters:")
     print(f"  Year Range: {args.start_year} - {args.end_year}")
     print(f"  Filing Types: {', '.join(filing_types)}")
     print(f"  Max per company: {args.max_per_company}")
     print(f"  Test Mode: {'YES (50 companies only)' if args.test_mode else 'NO (all companies)'}")
+    print(f"  Extraction Method: {'NLP-based (SpaCy)' if use_nlp else 'Pattern-based (regex)'}")
+    print(f"  Caching: {'Enabled' if not args.no_cache else 'Disabled'}")
+    print(f"  Progress Bar: {'Enabled (tqdm)' if (TQDM_AVAILABLE and not args.no_progress_bar) else 'Disabled'}")
     print(f"  Output: {output_path}")
     print("="*80)
 
     # Initialize client and finder
     user_agent = load_user_agent_from_env()
-    client = SECClient(user_agent=user_agent)
-    finder = UniversityAffiliationFinder()
+    client = SECClient(user_agent=user_agent, use_cache=not args.no_cache)
+    finder = UniversityAffiliationFinder(use_nlp=use_nlp)
+
+    # Show cache stats if enabled
+    if not args.no_cache and client.cache:
+        stats = client.cache.get_stats()
+        if stats['total_entries'] > 0:
+            print(f"\nCache Statistics:")
+            print(f"  Cached filings: {stats['total_entries']}")
+            print(f"  Cache size: {stats['total_size_mb']} MB")
+            print(f"  Oldest entry: {stats['oldest_entry_days']} days old")
 
     # Convert years to date strings
     start_date = f"{args.start_year}-01-01"
@@ -244,6 +314,7 @@ def main():
             batch_size=50,
             save_interval=100,
             output_path=output_path,
+            use_progress_bar=not args.no_progress_bar,
         )
 
         # Deduplicate

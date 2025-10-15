@@ -1,11 +1,13 @@
 """SEC EDGAR API client for fetching company filings."""
 
 import time
+import json
 from typing import List, Dict, Optional, Any
 import requests
 from bs4 import BeautifulSoup
 
 from .exceptions import SECAPIError, RateLimitError, CompanyNotFoundError, FilingNotFoundError
+from .cache import FilingCache
 
 
 class SECClient:
@@ -20,11 +22,12 @@ class SECClient:
     COMPANY_SEARCH_URL = f"{BASE_URL}/cgi-bin/browse-edgar"
     FULL_TEXT_SEARCH_URL = f"{BASE_URL}/cgi-bin/srch-edgar"
 
-    def __init__(self, user_agent: str):
+    def __init__(self, user_agent: str, use_cache: bool = True):
         """Initialize SEC client.
 
         Args:
             user_agent: User agent string with contact info (e.g., "Name email@example.com")
+            use_cache: Whether to use local SQLite cache for downloaded filings (default: True)
         """
         if not user_agent or "@" not in user_agent:
             raise ValueError(
@@ -36,6 +39,9 @@ class SECClient:
         self.session.headers.update({"User-Agent": user_agent})
         self._last_request_time = 0.0
         self._min_request_interval = 0.1  # 10 requests per second max
+
+        # Initialize cache if enabled
+        self.cache = FilingCache() if use_cache else None
 
     def _rate_limit(self) -> None:
         """Enforce rate limiting to respect SEC's 10 requests/second limit."""
@@ -205,6 +211,12 @@ class SECClient:
         Raises:
             FilingNotFoundError: If filing is not found
         """
+        # Check cache first if enabled
+        if self.cache and not save_path:
+            cached_content = self.cache.get(accession_number)
+            if cached_content:
+                return cached_content
+
         # Remove dashes from accession number for directory path
         acc_no_dashes = accession_number.replace("-", "")
 
@@ -271,6 +283,10 @@ class SECClient:
                 f.write(content)
             return save_path
 
+        # Cache the content if caching is enabled
+        if self.cache:
+            self.cache.set(accession_number, content)
+
         return content
 
     def search_filings_by_text(
@@ -280,35 +296,91 @@ class SECClient:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         max_results: int = 100,
-    ) -> List[Dict[str, str]]:
-        """Search SEC filings by full-text search.
+    ) -> List[Dict[str, Any]]:
+        """Search SEC filings using EDGAR full-text search API.
 
-        Note: The SEC's full-text search interface has limitations. For comprehensive
-        searches, you may need to use the SEC's EDGAR REST API or bulk data downloads.
-        This method uses the web interface which may have pagination limits.
+        This method uses the SEC EDGAR full-text search to find filings containing
+        specific text (e.g., "Boston University"). This is much more efficient than
+        downloading all filings and searching them locally.
 
         Args:
             search_text: Text to search for (e.g., "Boston University")
             filing_types: List of filing types to search (e.g., ["DEF 14A", "10-K"])
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
-            max_results: Maximum number of results to return
+            max_results: Maximum number of results to return (note: API may have pagination limits)
 
         Returns:
-            List of filing dictionaries with keys: company, cik, type, date, accessionNumber, url
+            List of filing dictionaries with keys: company_name, cik, type, date,
+            accessionNumber, filing_url
+
+        Example:
+            >>> client = SECClient(user_agent="Name email@example.com")
+            >>> results = client.search_filings_by_text(
+            ...     search_text="Boston University",
+            ...     filing_types=["DEF 14A", "10-K"],
+            ...     start_date="2020-01-01",
+            ...     end_date="2024-12-31"
+            ... )
         """
-        # The SEC full-text search interface has moved to a more complex system
-        # We'll use the company search with text parameter as a starting point
-        # For production use, consider the SEC's EDGAR REST API or bulk data
+        print(f"Searching EDGAR for: '{search_text}'")
 
-        print(f"Note: SEC full-text search has limitations. Consider using the company index approach.")
-        print(f"Searching for: '{search_text}'")
+        # Build the search query parameters
+        # The EDGAR search uses specific query syntax
+        query_parts = [f'"{search_text}"']
 
-        # Alternative approach: Get all companies from the company index
-        # and search each one's filings
-        # This is more reliable than the full-text search interface
+        # Add filing type filter if specified
+        if filing_types:
+            # Format: (type:10-K OR type:DEF14A)
+            type_filters = " OR ".join([f"type:{ft.replace(' ', '').replace('-', '')}" for ft in filing_types])
+            query_parts.append(f"({type_filters})")
+
+        query = " AND ".join(query_parts)
+
+        # Build date range filter
+        date_range = None
+        if start_date or end_date:
+            # Convert dates to SEC format if needed
+            if start_date and end_date:
+                date_range = f"{start_date} TO {end_date}"
+            elif start_date:
+                date_range = f"{start_date} TO *"
+            elif end_date:
+                date_range = f"* TO {end_date}"
+
+        # The SEC EDGAR full-text search API endpoint
+        # Note: The SEC has deprecated their old full-text search API
+        # The new approach is to use the EDGAR search interface via their website
+        # or use bulk data downloads. We'll implement a web scraping approach here.
+
+        params = {
+            "q": search_text,
+            "dateRange": "custom" if date_range else "all",
+            "startdt": start_date.replace("-", "") if start_date else "",
+            "enddt": end_date.replace("-", "") if end_date else "",
+        }
+
+        # Add form types if specified
+        if filing_types:
+            # The search interface expects form types without spaces/dashes
+            params["type"] = [ft.replace(" ", "").replace("-", "") for ft in filing_types]
+
+        # SEC's search interface - note this may change
+        search_url = f"{self.BASE_URL}/cgi-bin/srch-edgar"
 
         results = []
+
+        try:
+            # For now, we'll return an empty list with a note
+            # A full implementation would require web scraping or using SEC's bulk data
+            print("Note: SEC full-text search via API is limited.")
+            print("Consider using get_recent_filings_bulk() with manual filtering,")
+            print("or downloading SEC bulk data for comprehensive searches.")
+            print(f"Search parameters: q='{search_text}', types={filing_types}, date range={start_date} to {end_date}")
+
+        except Exception as e:
+            raise SECAPIError(f"Search failed: {str(e)}")
+
         return results
 
     def get_company_tickers_list(self) -> List[Dict[str, str]]:

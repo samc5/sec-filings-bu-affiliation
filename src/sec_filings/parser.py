@@ -1,7 +1,7 @@
 """Parser utilities for extracting information from SEC filings."""
 
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from bs4 import BeautifulSoup, Tag
 
 
@@ -236,3 +236,224 @@ class FilingParser:
                             })
 
         return bios
+
+    @staticmethod
+    def extract_tables_from_html(html_content: str) -> List[Dict[str, any]]:
+        """Extract structured tables from HTML filing.
+
+        This method looks for tables that might contain biographical information
+        in a structured format (Name, Age, Position, Background columns).
+
+        Args:
+            html_content: Raw HTML content
+
+        Returns:
+            List of table data dictionaries with 'headers' and 'rows'
+        """
+        parser = FilingParser._detect_parser(html_content)
+        soup = BeautifulSoup(html_content, parser)
+
+        tables_data = []
+
+        # Find all tables in the document
+        tables = soup.find_all('table')
+
+        for table in tables:
+            # Extract headers
+            headers = []
+            header_row = table.find('tr')
+            if header_row:
+                header_cells = header_row.find_all(['th', 'td'])
+                headers = [cell.get_text(strip=True) for cell in header_cells]
+
+            # Extract rows
+            rows = []
+            for row in table.find_all('tr')[1:]:  # Skip header row
+                cells = row.find_all(['td', 'th'])
+                row_data = [cell.get_text(strip=True) for cell in cells]
+                if row_data and any(row_data):  # Skip empty rows
+                    rows.append(row_data)
+
+            # Only include tables with substantial content
+            if headers and rows and len(rows) > 0:
+                tables_data.append({
+                    'headers': headers,
+                    'rows': rows,
+                    'num_columns': len(headers),
+                    'num_rows': len(rows)
+                })
+
+        return tables_data
+
+    @staticmethod
+    def has_education_keywords(text: str) -> bool:
+        """Check if text contains education-related keywords.
+
+        This helps identify biographical sections that mention education/degrees.
+
+        Args:
+            text: Text to search
+
+        Returns:
+            True if education keywords found, False otherwise
+        """
+        education_keywords = [
+            r'\b(degree|graduated|alumnus|alumna|alumni)\b',
+            r'\b(studied|attended|earned|received|holds)\b',
+            r'\b(bachelor|master|doctorate|undergraduate|graduate)\b',
+            r'\b(B\.?A\.?|B\.?S\.?|M\.?A\.?|M\.?B\.?A\.?|Ph\.?D\.?|J\.?D\.?)\b',
+            r'\b(university|college|school|institute)\b',
+        ]
+
+        text_lower = text.lower()
+        for pattern in education_keywords:
+            if re.search(pattern, text_lower):
+                return True
+
+        return False
+
+    @staticmethod
+    def find_biographical_sections_enhanced(
+        html_content: str,
+        include_tables: bool = True
+    ) -> List[Dict[str, any]]:
+        """Enhanced biographical section finding with better pattern matching.
+
+        This is an improved version of find_biographical_sections() that uses
+        additional patterns from CLAUDE2.md recommendations.
+
+        Args:
+            html_content: Raw HTML content
+            include_tables: Whether to extract structured tables (default: True)
+
+        Returns:
+            List of dictionaries with 'section_name', 'content', and optionally 'table_data'
+        """
+        parser = FilingParser._detect_parser(html_content)
+        soup = BeautifulSoup(html_content, parser)
+        text = soup.get_text()
+
+        sections = []
+
+        # Enhanced patterns for biographical sections (from CLAUDE2.md)
+        bio_patterns = [
+            (r'Item\s+10\.?\s+Directors[,\s]+Executive Officers', 'Item 10: Directors & Officers'),
+            (r'(?:BOARD OF DIRECTORS|DIRECTORS AND EXECUTIVE OFFICERS)', 'Directors & Officers'),
+            (r'(?:EXECUTIVE OFFICERS?|MANAGEMENT TEAM)', 'Executive Officers'),
+            (r'(?:BIOGRAPHICAL?\s+INFORMATION|BIOGRAPHIES)', 'Biographies'),
+            (r'(?:PROPOSAL\s+\d+[\s\-]+ELECTION OF DIRECTORS)', 'Election of Directors'),
+            (r'(?:NOMINEES FOR DIRECTOR|DIRECTOR NOMINEES)', 'Director Nominees'),
+            (r'(?:CONTINUING DIRECTORS)', 'Continuing Directors'),
+            (r'(?:MANAGEMENT\s+DISCUSSION|MANAGEMENT\s+TEAM)', 'Management'),
+        ]
+
+        for pattern, section_name in bio_patterns:
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            for match in matches:
+                start = match.start()
+                # Extract a reasonable amount of text (up to 30000 chars or next major section)
+                end = min(start + 30000, len(text))
+
+                # Try to find the next "Item" or major section header
+                next_section = re.search(
+                    r'\n\s*(?:Item\s+\d+|ITEM\s+\d+|PART\s+[IVX]+|PROPOSAL\s+\d+)',
+                    text[start + 100:end],
+                    re.IGNORECASE
+                )
+                if next_section:
+                    end = start + 100 + next_section.start()
+
+                content = text[start:end].strip()
+
+                # Only include sections with substantial content
+                if len(content) > 200:
+                    section_data = {
+                        'section_name': section_name,
+                        'content': content,
+                        'start_position': start,
+                        'has_education_keywords': FilingParser.has_education_keywords(content)
+                    }
+
+                    sections.append(section_data)
+
+        # Extract tables if requested
+        if include_tables:
+            tables = FilingParser.extract_tables_from_html(html_content)
+            # Look for tables that might contain biographical info
+            for table in tables:
+                # Check if table headers suggest biographical content
+                headers_text = ' '.join(table['headers']).lower()
+                if any(keyword in headers_text for keyword in ['name', 'age', 'director', 'officer', 'position', 'background']):
+                    sections.append({
+                        'section_name': 'Biographical Table',
+                        'content': str(table['rows']),  # Convert to string for compatibility
+                        'start_position': -1,  # Mark as table-derived
+                        'table_data': table,
+                        'has_education_keywords': False
+                    })
+
+        # Remove duplicates (overlapping sections)
+        unique_sections = []
+        seen_positions = set()
+
+        for section in sorted(sections, key=lambda x: x['start_position']):
+            pos = section['start_position']
+            if pos == -1 or pos not in seen_positions:  # Always include tables
+                unique_sections.append(section)
+                if pos != -1:
+                    # Mark nearby positions as seen to avoid duplicates
+                    for i in range(pos - 100, pos + 100):
+                        seen_positions.add(i)
+
+        return unique_sections
+
+    @staticmethod
+    def extract_individual_bios_nlp(
+        bio_section_text: str,
+        use_spacy: bool = True
+    ) -> List[Dict[str, str]]:
+        """Extract individual biographies using NLP if available.
+
+        This method uses SpaCy NER if available, otherwise falls back to
+        pattern-based extraction.
+
+        Args:
+            bio_section_text: Text from a biographical section
+            use_spacy: Whether to use SpaCy if available (default: True)
+
+        Returns:
+            List of dictionaries with 'name' and 'bio' for each person
+        """
+        if use_spacy:
+            try:
+                from .biography_extractor import BiographyExtractor, is_spacy_available
+
+                if is_spacy_available():
+                    extractor = BiographyExtractor()
+                    persons = extractor.extract_person_names(bio_section_text)
+
+                    bios = []
+                    for i, person in enumerate(persons):
+                        # Get bio text around this person (up to next person or 2000 chars)
+                        start = person['start']
+                        if i + 1 < len(persons):
+                            end = persons[i + 1]['start']
+                        else:
+                            end = min(start + 2000, len(bio_section_text))
+
+                        bio_text = bio_section_text[start:end].strip()
+
+                        bios.append({
+                            'name': person['name'],
+                            'age': 'Unknown',  # SpaCy doesn't extract age
+                            'bio': bio_text
+                        })
+
+                    if bios:
+                        return bios
+
+            except ImportError:
+                pass  # Fall back to pattern-based
+
+        # Fallback to original pattern-based extraction
+        return FilingParser.extract_individual_bios(bio_section_text)
