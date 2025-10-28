@@ -94,8 +94,8 @@ class UniversityAffiliationFinder:
             # Find all mentions of the university (case-insensitive)
             for uni_match in re.finditer(uni_pattern, text, re.IGNORECASE):
                 # Extract context around the mention (±200 chars)
-                start = max(0, uni_match.start() - 200)
-                end = min(len(text), uni_match.end() + 200)
+                start = max(0, uni_match.start() - 1500)
+                end = min(len(text), uni_match.end() + 1500)
                 context = text[start:end]
 
                 # Determine affiliation type and confidence
