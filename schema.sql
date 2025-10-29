@@ -20,22 +20,11 @@ CREATE TABLE Alumni_Relationships (
     foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     buid CHAR(9) NOT NULL, -- not referencing BUID in other table because these are different people
-    relationship_with_bu VARCHAR(50) CHECK (relationship_with_bu IN (
+    relationship_to_bu VARCHAR(50) CHECK (relationship_to_bu IN (
         'Student', 'Professor', 'Admin', 'BoardOfTrustees', 'Donor', 'Researcher', 'Vendor'
     )),
+    relationship_with_alumni VARCHAR(50) CHECK (relationship_with_alumni IN('Parent', 'Spouse', 'Child', 'Other')), -- e.g. the bu alum here is the parent of the foreign alum
     PRIMARY KEY(foreign_alumni_id, name)
-);
-
--- Employment History table
-CREATE TABLE Employment_History (
-
-    alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
-    company_id INT REFERENCES Companies(id),
-    company_name TEXT,
-    year_start INT,
-    year_end INT,
-    location TEXT,
-    compensation NUMERIC
 );
 
 -- Name table (for alternate or full names)
@@ -44,6 +33,14 @@ CREATE TABLE Name (
     full_name TEXT NOT NULL,
     PRIMARY KEY(alumni_id, full_name)
 );
+
+-- Foreign Name Table
+CREATE TABLE Foreign_Name (
+    foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
+    full_name TEXT NOT NULL,
+    PRIMARY KEY(foreign_alumni_id, full_name)
+);
+
 
 -- Degree table
 CREATE TABLE Degree (
@@ -68,10 +65,31 @@ CREATE TABLE Companies (
 -- Filings table
 CREATE TABLE Filings (
     alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
+    filing_type TEXT,
+    link TEXT,
+    company_id INT REFERENCES Companies(id),
+    text_extracted TEXT,
+    date DATE,
+    PRIMARY KEY(alumni_id, link)
+);
+-- Foreign Filings table
+CREATE TABLE Foreign_Filings (
     foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
     filing_type TEXT,
     link TEXT,
     text_extracted TEXT,
     date DATE,
-    PRIMARY KEY(alumni_id, foreign_alumni_id, link)
+    PRIMARY KEY(foreign_alumni_id, link)
+);
+
+-- Employment History table
+CREATE TABLE Employment_History (
+
+    alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
+    company_id INT REFERENCES Companies(id),
+    company_name TEXT,
+    year_start INT,
+    year_end INT,
+    location TEXT,
+    compensation NUMERIC
 );
