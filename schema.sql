@@ -77,6 +77,7 @@ CREATE TABLE Foreign_Filings (
     foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
     filing_type TEXT,
     link TEXT,
+    company_id INT REFERENCES Companies(id),
     text_extracted TEXT,
     date DATE,
     PRIMARY KEY(foreign_alumni_id, link)
