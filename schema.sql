@@ -1,10 +1,10 @@
 -- Alumni table
 CREATE TABLE Alumni (
     id SERIAL PRIMARY KEY,
-    buid CHAR(9) UNIQUE NOT NULL,
+    buid CHAR(9) UNIQUE,
     year_of_birth INT,
     relationship_to_bu VARCHAR(50) CHECK (relationship_to_bu IN (
-        'Student', 'Professor', 'Admin', 'BoardOfTrustees', 'Donor', 'Researcher', 'Business', 'Transitive'
+        'Student', 'Professor', 'Admin', 'Board', 'Donor', 'Researcher', 'Business', 'Transitive'
     ))
 );
 
@@ -21,7 +21,7 @@ CREATE TABLE Alumni_Relationships (
     name TEXT NOT NULL,
     buid CHAR(9) NOT NULL, -- not referencing BUID in other table because these are different people
     relationship_to_bu VARCHAR(50) CHECK (relationship_to_bu IN (
-        'Student', 'Professor', 'Admin', 'BoardOfTrustees', 'Donor', 'Researcher', 'Vendor'
+        'Student', 'Professor', 'Admin', 'Board', 'Donor', 'Researcher', 'Vendor'
     )),
     relationship_with_alumni VARCHAR(50) CHECK (relationship_with_alumni IN('Parent', 'Spouse', 'Child', 'Other')), -- e.g. the bu alum here is the parent of the foreign alum
     PRIMARY KEY(foreign_alumni_id, name)
