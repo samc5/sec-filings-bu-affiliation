@@ -1,5 +1,5 @@
 -- Alumni table
-CREATE TABLE Alumni (
+CREATE TABLE IF NOT EXISTS Alumni (
     id SERIAL PRIMARY KEY,
     buid CHAR(9) UNIQUE,
     year_of_birth INT,
@@ -9,14 +9,14 @@ CREATE TABLE Alumni (
 );
 
 -- Foreign Alumni table
-CREATE TABLE Foreign_Alumni (
+CREATE TABLE IF NOT EXISTS Foreign_Alumni (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     school TEXT NOT NULL
 );
 
 -- Alumni Relationships table
-CREATE TABLE Alumni_Relationships (
+CREATE TABLE IF NOT EXISTS Alumni_Relationships (
     foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     buid CHAR(9) NOT NULL, -- not referencing BUID in other table because these are different people
@@ -28,14 +28,14 @@ CREATE TABLE Alumni_Relationships (
 );
 
 -- Name table (for alternate or full names)
-CREATE TABLE Name (
+CREATE TABLE IF NOT EXISTS Name (
     alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
     PRIMARY KEY(alumni_id, full_name)
 );
 
 -- Foreign Name Table
-CREATE TABLE Foreign_Name (
+CREATE TABLE IF NOT EXISTS Foreign_Name (
     foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
     full_name TEXT NOT NULL,
     PRIMARY KEY(foreign_alumni_id, full_name)
@@ -43,17 +43,17 @@ CREATE TABLE Foreign_Name (
 
 
 -- Degree table
-CREATE TABLE Degree (
+CREATE TABLE IF NOT EXISTS Degree (
+    id SERIAL PRIMARY KEY,
     alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
     school TEXT,
     degree_type TEXT,
     start_year INT,
-    end_year INT,
-    PRIMARY KEY(alumni_id, school, degree_type)
-);
+    end_year INT
+    );
 
 -- Companies table
-CREATE TABLE Companies (
+CREATE TABLE IF NOT EXISTS Companies (
     id SERIAL PRIMARY KEY,
 	cik CHAR(10), -- SEC key, not making this primary key because we may want non-public companies in here
     name TEXT NOT NULL,
@@ -63,7 +63,7 @@ CREATE TABLE Companies (
 );
 
 -- Filings table
-CREATE TABLE Filings (
+CREATE TABLE IF NOT EXISTS Filings (
     alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
     filing_type TEXT,
     link TEXT,
@@ -73,7 +73,7 @@ CREATE TABLE Filings (
     PRIMARY KEY(alumni_id, link)
 );
 -- Foreign Filings table
-CREATE TABLE Foreign_Filings (
+CREATE TABLE IF NOT EXISTS Foreign_Filings (
     foreign_alumni_id INT REFERENCES Foreign_Alumni(id) ON DELETE CASCADE,
     filing_type TEXT,
     link TEXT,
@@ -84,13 +84,13 @@ CREATE TABLE Foreign_Filings (
 );
 
 -- Employment History table
-CREATE TABLE Employment_History (
-
+CREATE TABLE IF NOT EXISTS Employment_History (
     alumni_id INT REFERENCES Alumni(id) ON DELETE CASCADE,
     company_id INT REFERENCES Companies(id),
     company_name TEXT,
     year_start INT,
     year_end INT,
     location TEXT,
-    compensation NUMERIC
+    compensation NUMERIC,
+    PRIMARY KEY(alumni_id, company_id)
 );
