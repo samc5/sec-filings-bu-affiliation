@@ -193,7 +193,7 @@ def insert_filing(alumni_id, file_link):
     conn = postgres_connect()
     cursor = conn.cursor()
     insert_query = """
-    INSERT INTO Filings (alumni_id, file_link)
+    INSERT INTO Filings (alumni_id, link)
     VALUES (%s, %s)
     """
     cursor.execute(insert_query, (alumni_id, file_link))
