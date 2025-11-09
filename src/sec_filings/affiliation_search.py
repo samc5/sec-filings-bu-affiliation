@@ -24,6 +24,8 @@ class UniversityAffiliationFinder:
     BU_PATTERNS = [
         r"Boston\s+University",
         r"Boston\s+U\.",
+        r"\s+BU\s+",
+        r"\s+B\.\s*U\.\s"
     ]
 
     # Degree patterns

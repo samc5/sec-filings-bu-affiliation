@@ -18,7 +18,8 @@ from openai import AzureOpenAI, OpenAI
 import anthropic
 import json
 from dotenv import load_dotenv
-from database import insert_alumni, insert_name, alumni_match, insert_employment_history, insert_degree, insert_filing
+from sec_filings.database import postgres_connect, insert_alumni, insert_bu_name, alumni_match, insert_employment_history, insert_degree, insert_filing, \
+    update_alumni, update_bu_name, update_employment_history, update_degree, update_filing, upsert_alumni, alumni_worked_at
 load_dotenv() 
 
 # Initialize client
@@ -40,24 +41,34 @@ gpt5_messages = GPT5Client.responses
 anthropic_messages = AnthropicClient.messages
 openai_messages = OpenAIClient.responses
 
+def openai_wrapper(prompt, model):
+    response = OpenAIClient.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that extracts information from SEC filings."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return response.choices[0].message.content
 
-# anthropic_response = anthropic_messages.create(
-#     model="claude-sonnet-4-5",
-#     max_tokens=1000,
-#     messages=[
-#         {"role": "user", "content": "say hi and give yourself a name"}
-#     ]
-# )
-# print(anthropic_response.content[0].text)
+def anthropic_wrapper(prompt, model):
+    response = anthropic_messages.create(
+        model=model,
+        max_tokens=1000,
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return response.content[0].text
 
 
 deployment_name = "gpt-4o-mini"
-def extract_bu_names(text, client=GPT5Client):
+def extract_bu_names(text, FILING_DATE, client=OpenAIClient):
     prompt = f"""
     You are an assistant searching through biographies in DEF 14A SEC filings, for people associated with Boston University. Your goal is to construct a list of everyone you see with any relation to Boston University, no matter how small
     Extract all personal names mentioned in the text that are associated with Boston University in any way (current students, alumni, professors, researchers, employees, transitive (related to BU through a family member), etc.). If you miss a single person terrible things will happen
     Return them as a JSON list of objects containing {{['name': 'XXX', 'quote': 'quote mentioning the relation to BU, including the person's name or at least Mr. XXX to establish that it is the right person', 'relationship to BU': 'XXX', 'year_of_birth': 'XXX', 'editorial': '1-2 sentences explaining the relationship in your words', 'reconsider': 'did the quote actually show a relationship to BU (Y or N)']}}. Do not include any other characters such as ```json
-    Please use the full name of each person (first and last name(s) only, don't include middle initial). If you cannot find the name, write "Unknown". Year of birth should be a 4-digit year if available, otherwise null
+    Please use the full name of each person (first and last name(s) only, don't include middle initial). If you cannot find the name, write "Unknown". Year of birth should be a 4-digit year if available, otherwise null. You can calculate this from their current age if given. The filing date is {FILING_DATE}
     Relationship must be exactly one of the following: "Student", "Professor", "Admin", "Board", "Donor", "Researcher", "Business", "Transitive". If you label it anything else, terrible things will happen
     - Student: Either currently enrolled or graduated from BU, with any degree. If they qualify for other categories (e.g., professor), still label as Student. This category includes all alumni.
     - Professor: Any teaching role at BU (professor, lecturer, instructor, adjunct). If they were a professor for another university but not BU, do not include them
@@ -70,16 +81,7 @@ def extract_bu_names(text, client=GPT5Client):
     Text:
     {text}
     """
-
-    response = client.chat.completions.create(
-        model="gpt-5",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that extracts information from SEC filings."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-
-    return response.choices[0].message.content
+    return openai_wrapper(prompt, deployment_name)
 
 
 
@@ -93,59 +95,65 @@ def extract_university_names(text, client=OpenAIClient):
     Text:
     {text}
     """
-    response = client.chat.completions.create(
-        model=deployment_name,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that extracts information from SEC filings."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-    return response.choices[0].message.content
+    return openai_wrapper(prompt, deployment_name)
 
-def extract_employment_history(text, PERSON_NAME, client=OpenAIClient):
+def extract_employment_history(text, PERSON_NAME, COMPANY_NAME, client=OpenAIClient):
     prompt = f"""
     You are an assistant searching through biographies in DEF 14A SEC filings for employment history. Your goal is to find all companies that {PERSON_NAME} has worked at mentioned in the text.
     Extract all companies where {PERSON_NAME} has been employed, along with any available information about dates and compensation. If you miss a single company terrible things will happen
     Return them as a JSON list of objects containing {{['company_name': 'XXX', 'year_start': 'XXX', 'year_end': 'XXX', 'compensation': 'XXX', 'location': 'XXX']}}. Do not include any other characters such as ```json
     Please use the full official name of each company
     For year_start and year_end: Use the year as a 4-digit number (e.g., "2015"). If only one year is mentioned, put it in year_start and leave year_end as null. If the person currently works there, put "present" in year_end. If no dates are available, use null
-    For compensation: Include any salary, bonus, stock options, or other compensation mentioned. If not available, use null. Location should be just the city name if available, otherwise null
-    If a company is mentioned but no employment relationship is clear, do not include it
+    For compensation: Written text outlining any salary, bonus, stock options, or other compensation mentioned. If not available, use null. Location should be just the city name if available, otherwise null
+    If a company is mentioned but no employment relationship is clear, do not include it. The company whose filing this is is called {COMPANY_NAME}; include this as well, and if "The Company" is used to refer to it, recognize that as well
     Text:
     {text}
     """
-    response = client.chat.completions.create(
-        model=deployment_name,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant that extracts information from SEC filings."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-    return response.choices[0].message.content
+    return openai_wrapper(prompt, deployment_name)
 
 def extract_degree(text, PERSON_NAME, client=OpenAIClient):
     prompt = f"""
     You are an assistant searching through biographies in DEF 14A SEC filings for educational degrees. Your goal is to find all degrees at Boston University that {PERSON_NAME} has obtained mentioned in the text.
     Extract all degrees at Boston University where {PERSON_NAME} has graduated, along with any available information about field of study and graduation year. If you miss a single degree terrible things will happen
-    Return them as a JSON list of objects containing {{['school': 'School within BU, e.g. School of Law, do not include the words Boston University', 'degree_type': 'abbrevation, no period, e.g. MBA, JD, BS', 'end_year': 'XXX', 'start_year': 'XXX']}}. Do not include any other characters such as ```json
+    Return them as a JSON list of objects containing {{['school': 'School within BU, e.g. School of Law, do not include the words Boston University', 'degree_type': 'abbrevation, no period, e.g. MBA, JD, BS', 'end_year': 'XXX', 'start_year': 'XXX']}}.
+    The list of acceptable BU Schools is as follows
+    - School of Medicine
+    - College of Arts & Sciences
+    - College of Communication
+    - College of Engineering
+    - College of Fine Arts
+    - Faculty of Computing & Data Sciences
+    - Frederick S. Pardee School of Global Studies
+    - Graduate Medical Sciences
+    - Henry M. Goldman School of Dental Medicine
+    - Metropolitan College
+    - Questrom School of Business
+    - Sargent College of Health & Rehabilitation Sciences
+    - School of Hospitality Administration
+    - School of Law
+    - School of Public Health
+    - School of Social Work
+    - School of Theology
+    - Wheelock College of Education & Human Development
+    - Division of Military Education
+    The list of acceptable degree types is as follows
+    - BA, BS, BFA, BM
+    - MA, MS, MArch, MBA, MEd, MEng, MM, MPH
+    - PhD, EdB, DBA, JD, MD, DScD
+    - if a degree is mentioned but not equal or an offshoot of these, include it as written in the text
     For start and end years: Use the year as a 4-digit number (e.g., "2015"). If no year is available, use null
-    If a degree is mentioned but no graduation relationship is clear, do not include it
+    Do not include any other characters such as ```json
     Text:
     {text}
     """
-    response = client.chat.completions.create(
-        model=deployment_name,
-        messages=[
-            {"role": "user", "content": prompt}
-        ]
-    )
-    return response.choices[0].message.content
+    return openai_wrapper(prompt, deployment_name)
 
 
 def parse_company_index(file_path):
-    # read the file and print 5 lines
-    # download the file first
     file_list = []
+    company_names = []
+    company_ciks = []
+    filing_dates = []
     with open(file_path, 'r') as f:
         lines = f.readlines()
         for line in lines[11:]:
@@ -154,27 +162,68 @@ def parse_company_index(file_path):
             if parts[1] == 'DEF 14A':
                 # sleep(0.1)
                 url = f'https://www.sec.gov/Archives/{parts[4]}'
+                company_names.append(parts[0])
+                company_ciks.append(parts[2])
+                filing_dates.append(parts[3])
                 file_list.append(url)
-    return file_list
+    return file_list, company_names, company_ciks, filing_dates
+
+def process_person_matches(person_matches):
+    """
+    Go from people's names to inserting all info into the database
+    """
+    for persons_dict in person_matches:
+        matching_text = persons_dict['matching_text']
+        # check if name is already in database
+        existing_alumni = alumni_match(persons_dict['name'], conn)
+        alum_function = upsert_alumni
+        name_function = insert_bu_name
+        degree_function = insert_degree
+        filing_function = insert_filing
+        if existing_alumni:
+            # Use update functions
+            print(f'{persons_dict["name"]} already exists in database with ID {existing_alumni}')
+            name_function = update_bu_name
+            degree_function = update_degree
+            filing_function = update_filing
+        # Alumni Table
+        new_id = alum_function(persons_dict, conn)
+       
+        # Name Table
+        name_function(new_id, persons_dict['name'], conn)
+        print(f'Inserted {persons_dict["name"]} with ID {new_id} into database.')
     
+        # Employment History
+        employment_history = extract_employment_history(matching_text, persons_dict['name'], company_name)
+        print(f'Employment history for {persons_dict["name"]}: {employment_history}')
+        employment_list = json.loads(employment_history)
+
+        for employment_dict in employment_list:
+            if alumni_worked_at(new_id, employment_dict.get('company_name', None), conn):
+                update_employment_history(new_id, employment_dict, conn)
+            else:
+                insert_employment_history(new_id, employment_dict, conn)
+        # BU degrees
+        bu_degrees = extract_degree(matching_text, persons_dict['name'])
+        print(f'BU degrees found: {bu_degrees}')
+        degree_list = json.loads(bu_degrees)
+        for degree_dict in degree_list:
+            degree_function(new_id, degree_dict, conn)
+        # insert filing
+        filing_function(new_id, str(src), company_name, company_cik, matching_text, filing_date, conn)
+        # other universities
+        # other_universities = extract_university_names(context)
+        # print(f'Other universities found: {other_universities}')
+    
+        print("-------------")
+    return None
 
 
-
-# print(extract_bu_names("Jane Doe went to Boston University. John Smith went to Boston College"))
 if __name__ == "__main__":
-    # Your SEC filings
-    files = [
-        "https://sec.gov/Archives/edgar/data/1581068/0001104659-24-034494.txt", # Brixmor
-        "https://sec.gov/Archives/edgar/data/889331/0001140361-24-013241.txt", # little fuse
-        "https://sec.gov/Archives/edgar/data/742278/0001558370-24-003185.txt", # RES
-        "https://sec.gov/Archives/edgar/data/800240/0001193125-24-067877.txt", # ODP corp
-        "https://sec.gov/Archives/edgar/data/1371489/0001140361-24-013240.txt", # III
-        "https://sec.gov/Archives/edgar/data/1558569/0001558370-24-003129.txt", # ISPC        "https://sec.gov/Archives/edgar/data/1052752/0001140361-24-013007.txt" # GTY
-    ]
     # download all DEF 14A filings from a certain quarter for testing
-    files = parse_company_index('../data/q1_2025.idx')
+    files, company_names, company_ciks, filing_dates = parse_company_index('../data/q1_2025.idx')
     print(f'Found {len(files)} DEF 14A filings in index')
-
+    files = files[8:]
     # Where to save downloaded filings (relative to repo root)
     downloads_dir = Path(__file__).parent.parent / "data" / "bulk" / "downloads"
     downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -191,6 +240,7 @@ if __name__ == "__main__":
 
     # Initialize finders
     pattern_finder = UniversityAffiliationFinder(use_nlp=False)
+    conn = postgres_connect()
 
     nlp_available = is_spacy_available()
     nlp_finder = None
@@ -201,9 +251,13 @@ if __name__ == "__main__":
             nlp_finder = None
 
     # Process each file (URL or accession number)
-    for src in files:
+    for file_index in range(len(files)):
+        src = files[file_index]
+        company_name = company_names[file_index]
+        company_cik = company_ciks[file_index]
+        filing_date = filing_dates[file_index]
         print("\n" + "#" * 80)
-        print(f"Processing: {src}, number of files left: {len(files)-files.index(src)-1}")
+        print(f"Processing: | {company_name} | {company_cik} | {filing_date} | \n {src} number of files left: {len(files)-files.index(src)-1}")
         print("#" * 80)
 
         content = None
@@ -257,44 +311,26 @@ if __name__ == "__main__":
             continue
         # print size of content
         print(f"Content size: {len(content)} characters")
-        if len(content) > 10000000:
+        if len(content) > 20000000:
             print("Content too large, skipping")
             continue
         print("Made it to pre-parser")
         # Use parser to extract text and candidate bio sections
         parser = FilingParser()
+        content = parser.extract_text_from_html(content)
         try:
-            sections = parser.find_biographical_sections_enhanced(content)
+            # sections = parser.find_biographical_sections_enhanced(content)
+            sections = parser.find_bu_sections(content)
         except Exception:
             # Fallback
-            sections = parser.find_biographical_sections(content)
-        if not sections:
-            # If we didn't find sections, treat whole document as one section
-            extracted_text = parser.extract_text_from_html(content)
-            subbed = re.sub('\s{2,}', ' ', extracted_text)
-            # replace more than 1 newline with 1
-            subbed = re.sub('\n{2,}', '\n', subbed)
-            sections = [{"section_name": "Full Document", "content": subbed}]
+            sections = parser.find_bu_sections(content)
 
         # Run pattern-based extraction across sections
         all_pattern_matches = []
         for sec in sections:
-            matches = pattern_finder.search_filing(sec.get("content", ""), filing_metadata={"source": str(src)})
-            all_pattern_matches.extend(matches)
-        # save to a json before dedup
-        # json_path = downloads_dir / f"test_pattern_matches.json"
-        # with open(json_path, "w", encoding="utf-8") as f:
-        #     json.dump([m.__dict__ for m in all_pattern_matches], f, ensure_ascii=False, indent=2)
+            all_pattern_matches.append(sec['content'])
 
-        # all_pattern_matches = UniversityAffiliationFinder.deduplicate_matches(all_pattern_matches)
-
-        # # save sections to a json file
-        # if src == files[0]:
-        #     json_path = downloads_dir / f"test_sections.json"
-        #     with open(json_path, "w", encoding="utf-8") as f:
-        #         json.dump(sections, f, ensure_ascii=False, indent=2)
-
-        print("Commencing the BU extraction")
+        print(f"Commencing the BU extraction with {len(all_pattern_matches)} candidate sections...")
 
         titles = ['Mr.', 'Ms.', 'Mrs.', 'Dr.']
         person_matches = []
@@ -302,10 +338,12 @@ if __name__ == "__main__":
         title_names_set = set()
         person_name_set = set()
         last_name_set = set()
-        for i, m in enumerate(all_pattern_matches, 1):
-            persons_found = extract_bu_names(m.context)
+        for i, matching_text in enumerate(all_pattern_matches, 1):
+            persons_found = extract_bu_names(matching_text, filing_date)
+            # Don't include if name already found else
             persons_list = json.loads(persons_found)
-            for persons_dict in persons_list:                
+            for persons_dict in persons_list:          
+                persons_dict['matching_text'] = matching_text    
                 if any(title in persons_dict['name'] for title in titles):
                     if persons_dict['name'] not in title_names_set and persons_dict['reconsider'] == 'Y':
                         title_names_set.add(persons_dict['name'])
@@ -321,36 +359,12 @@ if __name__ == "__main__":
             if last_name not in last_name_set:
                 person_matches.append(title_dict)
                 last_name_set.add(last_name)
-        for persons_dict in person_matches:
-            existing_alumni = alumni_match(persons_dict['name'])
-            if existing_alumni:
-                print(f'{persons_dict["name"]} already exists in database with ID {existing_alumni}')
-            else:
-                new_id = insert_alumni(persons_dict)
-                insert_name('BU', new_id, persons_dict['name'])
-                print(f'Inserted {persons_dict["name"]} with ID {new_id} into database.')
-                # print employment history
-                employment_history = extract_employment_history(m.context, persons_dict['name'])
-                print(f'Employment history for {persons_dict["name"]}: {employment_history}')
-                employment_list = json.loads(employment_history)
-                for employment_dict in employment_list:
-                    insert_employment_history(new_id, employment_dict)
-                # BU degrees
-                bu_degrees = extract_degree(m.context, persons_dict['name'])
-                print(f'BU degrees found: {bu_degrees}')
-                degree_list = json.loads(bu_degrees)
-                for degree_dict in degree_list:
-                    insert_degree(new_id, degree_dict)
-                # insert filing
-                insert_filing(new_id, str(src))
+        print(f'After title reconciliation, found {len(person_matches)} unique person matches related to BU.')
+        # calculate other info
 
-                    
-                # other universities
-                other_universities = extract_university_names(m.context)
-                print(f'Other universities found: {other_universities}')
+        process_person_matches(person_matches)
 
-            print("-------------")
-
-        print(f'OpenAI found {person_matches}')
+        # print(f'OpenAI found {person_matches}')
 
     print("\nAll files processed.")
+    conn.close()
