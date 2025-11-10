@@ -460,3 +460,31 @@ class FilingParser:
 
         # Fallback to original pattern-based extraction
         return FilingParser.extract_individual_bios(bio_section_text)
+    @staticmethod
+    def find_bu_sections(text):
+        """Find sections related to Boston University in the filing text.
+        Args:
+            text: Cleaned text from filing
+        Returns:
+            List of dictionaries (section_name, content)
+        """
+        bu_patterns = [
+            (r'\bBoston\s*University\b', 'Boston University Mention'),
+            # (r'\s+BU\s+', 'BU Mention'),
+            (r'\bBoston\s*Univ\.?\b', 'Boston Univ. Mention')
+        ]
+        sections = []
+        for pattern, section_name in bu_patterns:
+            matches = list(re.finditer(pattern, text, re.IGNORECASE))
+            for match in matches:
+                start = max(0, match.start() - 2000)  # Get some context before the match
+                end = min(len(text), match.end() + 2000)  # And after
+                print(start, end)
+                content = text[start:end].strip()
+                sections.append({
+                    'section_name': section_name,
+                    'content': content,
+                    'start_position': start
+                })
+                # print('found BU section:', content) 
+        return sections
