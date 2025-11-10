@@ -1,0 +1,4 @@
+Sam 10/31
+- changed BoardOfTrustees in schema to Board (to match prompt)
+- Made buid allowed to be null since we want to add the alum to the DB before we have their buid (that will be done later)
+- built functions to insert into alumni and names tables

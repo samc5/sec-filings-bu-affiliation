@@ -1,8 +1,8 @@
 """Tests for SEC client."""
 
 import pytest
-from sec_filings import SECClient
-from sec_filings.exceptions import SECAPIError
+from src.sec_filings import SECClient
+from src.sec_filings.exceptions import SECAPIError
 
 
 def test_client_requires_valid_user_agent():

@@ -1,0 +1,16 @@
+Description:           Master Index of EDGAR Dissemination Feed by Company Name
+Last Data Received:    March 31, 2025
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+
+
+
+
+Company Name                                                  Form Type   CIK         Date Filed  File Name
+---------------------------------------------------------------------------------------------------------------------------------------------
+&PARTNERS                                                     DEF 14A       107136      2025-02-14  edgar/data/107136/0001214659-25-002647.txt          
+&PARTNERS                                                     MA-A             107136      2025-03-05  edgar/data/107136/0000107136-25-000003.txt          
+&PARTNERS                                                     10-K          107136      2025-03-18  edgar/data/107136/0000107136-25-000005.txt          
+025 - Series of IPOSharks Venture Master Fund, LLC            D/A              2005180     2025-01-31  edgar/data/2005180/0002005180-25-000001.txt         
+0xSecure Fund I, a series of WillowTech Ventures, LP          DEF 14A              1996402     2025-01-13  edgar/data/1996402/0001996402-25-000001.txt         
+1 800 FLOWERS COM INC                                         DEF 14A             1084869     2025-01-31  edgar/data/1084869/0001437749-25-002365.txt         

@@ -68,6 +68,8 @@ class FilingParser:
         parser = FilingParser._detect_parser(html_content)
         soup = BeautifulSoup(html_content, parser)
         text = soup.get_text()
+        text = re.sub('\s{2,}', ' ', text)  # Normalize whitespace
+        text = re.sub('\n{2,}', '\n', text)  # Replace multiple newlines with a single newline
 
         sections = []
 
@@ -135,7 +137,7 @@ class FilingParser:
             "company", "inc.", "llc", "ltd", "limited", "incorporated",
             "new york", "nasdaq", "exchange", "federal", "department",
             "united states", "internal revenue", "financial accounting",
-            "table of contents", "form 10", "part i"
+            "table of contents", "form 10", "part i", "board of directors", "executive director", "director"
         ]
 
         def is_likely_person_name(name: str) -> bool:
@@ -332,14 +334,15 @@ class FilingParser:
         parser = FilingParser._detect_parser(html_content)
         soup = BeautifulSoup(html_content, parser)
         text = soup.get_text()
-
+        text = re.sub('\s{2,}', ' ', text)  # Normalize whitespace
+        text = re.sub('\n{2,}', '\n', text)  # Replace multiple newlines with a single newline
         sections = []
 
         # Enhanced patterns for biographical sections (from CLAUDE2.md)
         bio_patterns = [
             (r'Item\s+10\.?\s+Directors[,\s]+Executive Officers', 'Item 10: Directors & Officers'),
             (r'(?:BOARD OF DIRECTORS|DIRECTORS AND EXECUTIVE OFFICERS)', 'Directors & Officers'),
-            (r'(?:EXECUTIVE OFFICERS?|MANAGEMENT TEAM)', 'Executive Officers'),
+            (r'(?:EXECUTIVE OFFICERS|MANAGEMENT TEAM)', 'Executive Officers'),
             (r'(?:BIOGRAPHICAL?\s+INFORMATION|BIOGRAPHIES)', 'Biographies'),
             (r'(?:PROPOSAL\s+\d+[\s\-]+ELECTION OF DIRECTORS)', 'Election of Directors'),
             (r'(?:NOMINEES FOR DIRECTOR|DIRECTOR NOMINEES)', 'Director Nominees'),

@@ -24,6 +24,8 @@ class UniversityAffiliationFinder:
     BU_PATTERNS = [
         r"Boston\s+University",
         r"Boston\s+U\.",
+        r"\s+BU\s+",
+        r"\s+B\.\s*U\.\s"
     ]
 
     # Degree patterns
@@ -93,9 +95,9 @@ class UniversityAffiliationFinder:
         for uni_pattern in self.university_patterns:
             # Find all mentions of the university (case-insensitive)
             for uni_match in re.finditer(uni_pattern, text, re.IGNORECASE):
-                # Extract context around the mention (±200 chars)
-                start = max(0, uni_match.start() - 200)
-                end = min(len(text), uni_match.end() + 200)
+                # Extract context around the mention (±1500 chars)
+                start = max(0, uni_match.start() - 1500)
+                end = min(len(text), uni_match.end() + 1500)
                 context = text[start:end]
 
                 # Determine affiliation type and confidence
@@ -151,7 +153,7 @@ class UniversityAffiliationFinder:
         self,
         text: str,
         organization_names: Optional[List[str]] = None,
-        context_window: int = 500
+        context_window: int = 1500
     ) -> List[AffiliationMatch]:
         """Find affiliations using NLP-based extraction.
 

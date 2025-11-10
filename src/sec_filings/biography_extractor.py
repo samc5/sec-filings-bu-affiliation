@@ -171,7 +171,7 @@ class BiographyExtractor:
         self,
         text: str,
         organization_names: List[str],
-        context_window: int = 500
+        context_window: int = 1000
     ) -> List[PersonAffiliation]:
         """Extract person affiliations with specified organizations.
 
@@ -344,7 +344,7 @@ class BiographyExtractor:
             degree=degree,
             degree_year=degree_year,
             position=position,
-            context=context[:500],  # Limit context length
+            context=context,  # Don'tLimit context length
             confidence=confidence
         )
 
