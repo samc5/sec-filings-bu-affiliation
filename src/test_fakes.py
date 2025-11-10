@@ -6,7 +6,7 @@ import csv
 from pathlib import Path
 from datetime import datetime
 import re
-from sec_filings import (
+from src.sec_filings import (
     SECClient,
     UniversityAffiliationFinder,
     BiographyExtractor,
@@ -18,7 +18,7 @@ from openai import AzureOpenAI, OpenAI
 import anthropic
 import json
 from dotenv import load_dotenv
-from sec_filings.database import postgres_connect, insert_alumni, insert_bu_name, alumni_match, insert_employment_history, insert_degree, insert_filing, \
+from src.sec_filings.database import postgres_connect, insert_alumni, insert_bu_name, alumni_match, insert_employment_history, insert_degree, insert_filing, \
     update_alumni, update_bu_name, update_employment_history, update_degree, update_filing, upsert_alumni, alumni_worked_at
 load_dotenv() 
 
@@ -137,9 +137,9 @@ def extract_degree(text, PERSON_NAME, client=OpenAIClient):
     - Wheelock College of Education & Human Development
     - Division of Military Education
     The list of acceptable degree types is as follows
-    - BA, BS, BFA, BM
-    - MA, MS, MArch, MBA, MEd, MEng, MM, MPH
-    - PhD, EdB, DBA, JD, MD, DScD
+    - BA, BS, BFA, BM, BBA
+    - MA, MS, MArch, MBA, MSBA, MEd, MEng, MM, MPH
+    - PhD, EdB, DBA, JD, MD, DScD, LLM
     - if a degree is mentioned but not equal or an offshoot of these, include it as written in the text
     For start and end years: Use the year as a 4-digit number (e.g., "2015"). If no year is available, use null
     Do not include any other characters such as ```json
@@ -156,19 +156,30 @@ def parse_company_index(file_path):
     filing_dates = []
     with open(file_path, 'r') as f:
         lines = f.readlines()
-        for line in lines[11:]:
+        for line in lines[10:]:
             # split by multiple whitespaces
             parts = re.split(r'\s{2,}', line.strip())
             if parts[1] == 'DEF 14A':
                 # sleep(0.1)
                 url = f'https://www.sec.gov/Archives/{parts[4]}'
                 company_names.append(parts[0])
-                company_ciks.append(parts[2])
+                company_ciks.append(parts[2].zfill(10))
                 filing_dates.append(parts[3])
                 file_list.append(url)
     return file_list, company_names, company_ciks, filing_dates
 
-def process_person_matches(person_matches):
+def remove_jsonmarkdown(text):
+    """
+    If text is wrapped in ``json ```, remove those markers and only keep middle
+    """
+    pattern = r'```json(.*?)```'
+    cleaned_text = re.sub(pattern, r'\1', text, flags=re.DOTALL)
+    return cleaned_text.strip()
+
+
+def process_person_matches(
+    person_matches, company_name, company_cik, filing_date, file_link, conn,
+    alum_function=None, name_function=None, degree_function=None, filing_function=None, employment_function=None):
     """
     Go from people's names to inserting all info into the database
     """
@@ -196,7 +207,9 @@ def process_person_matches(person_matches):
         # Employment History
         employment_history = extract_employment_history(matching_text, persons_dict['name'], company_name)
         print(f'Employment history for {persons_dict["name"]}: {employment_history}')
-        employment_list = json.loads(employment_history)
+        
+        cleaned_employment_history = remove_jsonmarkdown(employment_history)
+        employment_list = json.loads(cleaned_employment_history)
 
         for employment_dict in employment_list:
             if alumni_worked_at(new_id, employment_dict.get('company_name', None), conn):
@@ -206,11 +219,12 @@ def process_person_matches(person_matches):
         # BU degrees
         bu_degrees = extract_degree(matching_text, persons_dict['name'])
         print(f'BU degrees found: {bu_degrees}')
-        degree_list = json.loads(bu_degrees)
+        cleaned_bu_degrees = remove_jsonmarkdown(bu_degrees)
+        degree_list = json.loads(cleaned_bu_degrees)
         for degree_dict in degree_list:
             degree_function(new_id, degree_dict, conn)
         # insert filing
-        filing_function(new_id, str(src), company_name, company_cik, matching_text, filing_date, conn)
+        filing_function(new_id, str(file_link), company_name, company_cik, matching_text, filing_date, conn)
         # other universities
         # other_universities = extract_university_names(context)
         # print(f'Other universities found: {other_universities}')
@@ -218,12 +232,65 @@ def process_person_matches(person_matches):
         print("-------------")
     return None
 
+import json
+
+def reconcile_person_matches(all_pattern_matches, filing_date, extract_bu_names):
+    """
+    Extracts and reconciles unique person matches from pattern matches.
+    
+    Args:
+        all_pattern_matches (list[str]): List of matching text segments.
+        filing_date (str): Filing date for name extraction.
+        extract_bu_names (callable): Function to extract names given text and filing date. (changeable so that it can be tested deterministically)
+    
+    Returns:
+        list[dict]: List of reconciled person match dictionaries.
+    """
+    titles = ['Mr.', 'Ms.', 'Mrs.', 'Dr.']
+    person_matches = []
+    title_matches = []
+    title_names_set = set()
+    person_name_set = set()
+    last_name_set = set()
+    
+    for matching_text in all_pattern_matches:
+        persons_found = extract_bu_names(matching_text, filing_date)
+        cleaned_persons_found = remove_jsonmarkdown(persons_found)
+        persons_list = json.loads(cleaned_persons_found)
+        
+        for persons_dict in persons_list:
+            persons_dict['matching_text'] = matching_text
+            name = persons_dict['name']
+            reconsider = persons_dict.get('reconsider') == 'Y'
+            
+            if not reconsider:
+                continue
+            # If the name has a title, add to title matches
+            if any(title in name for title in titles):
+                if name not in title_names_set:
+                    title_names_set.add(name)
+                    title_matches.append(persons_dict)
+            # if the name has no title, add to person matches if its new
+            else:
+                if name not in person_name_set:
+                    person_name_set.add(name)
+                    last_name_set.add(name.split()[-1])
+                    person_matches.append(persons_dict)
+    
+    # Include only titled names whose last name not already in last_name_set
+    for title_dict in title_matches:
+        last_name = title_dict['name'].split()[-1]
+        if last_name not in last_name_set:
+            person_matches.append(title_dict)
+            last_name_set.add(last_name)
+    
+    return person_matches
+
 
 if __name__ == "__main__":
     # download all DEF 14A filings from a certain quarter for testing
-    files, company_names, company_ciks, filing_dates = parse_company_index('../data/q1_2025.idx')
+    files, company_names, company_ciks, filing_dates = parse_company_index('data/q2_2005.idx')
     print(f'Found {len(files)} DEF 14A filings in index')
-    files = files[8:]
     # Where to save downloaded filings (relative to repo root)
     downloads_dir = Path(__file__).parent.parent / "data" / "bulk" / "downloads"
     downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -241,14 +308,6 @@ if __name__ == "__main__":
     # Initialize finders
     pattern_finder = UniversityAffiliationFinder(use_nlp=False)
     conn = postgres_connect()
-
-    nlp_available = is_spacy_available()
-    nlp_finder = None
-    if nlp_available:
-        try:
-            nlp_finder = UniversityAffiliationFinder(use_nlp=True)
-        except Exception:
-            nlp_finder = None
 
     # Process each file (URL or accession number)
     for file_index in range(len(files)):
@@ -311,7 +370,7 @@ if __name__ == "__main__":
             continue
         # print size of content
         print(f"Content size: {len(content)} characters")
-        if len(content) > 20000000:
+        if len(content) > 100000000:
             print("Content too large, skipping")
             continue
         print("Made it to pre-parser")
@@ -332,37 +391,11 @@ if __name__ == "__main__":
 
         print(f"Commencing the BU extraction with {len(all_pattern_matches)} candidate sections...")
 
-        titles = ['Mr.', 'Ms.', 'Mrs.', 'Dr.']
-        person_matches = []
-        title_matches = []
-        title_names_set = set()
-        person_name_set = set()
-        last_name_set = set()
-        for i, matching_text in enumerate(all_pattern_matches, 1):
-            persons_found = extract_bu_names(matching_text, filing_date)
-            # Don't include if name already found else
-            persons_list = json.loads(persons_found)
-            for persons_dict in persons_list:          
-                persons_dict['matching_text'] = matching_text    
-                if any(title in persons_dict['name'] for title in titles):
-                    if persons_dict['name'] not in title_names_set and persons_dict['reconsider'] == 'Y':
-                        title_names_set.add(persons_dict['name'])
-                        title_matches.append(persons_dict)
-                else:
-                    if persons_dict['name'] not in person_name_set and persons_dict['reconsider'] == 'Y':
-                        person_name_set.add(persons_dict['name'])
-                        last_name_set.add(persons_dict['name'].split()[-1])
-                        person_matches.append(persons_dict)
-        # add titles in which don't appear in last name set
-        for title_dict in title_matches:
-            last_name = title_dict['name'].split()[-1]
-            if last_name not in last_name_set:
-                person_matches.append(title_dict)
-                last_name_set.add(last_name)
+        person_matches = reconcile_person_matches(all_pattern_matches, filing_date, extract_bu_names)
         print(f'After title reconciliation, found {len(person_matches)} unique person matches related to BU.')
         # calculate other info
 
-        process_person_matches(person_matches)
+        process_person_matches(person_matches, company_name, company_cik, filing_date, src, conn)
 
         # print(f'OpenAI found {person_matches}')
 
