@@ -169,6 +169,7 @@ def insert_degree(alumni_id, degree_dict, conn):
     degree_type = degree_dict.get('degree_type', None)
     end_year = degree_dict.get('end_year', None)
     start_year = degree_dict.get('start_year', None)
+    start_year, end_year = clean_years(start_year, end_year)
     cursor = conn.cursor()
     insert_query = """
     INSERT INTO Degree (alumni_id, school, degree_type, start_year, end_year)
@@ -323,7 +324,7 @@ def populate_companies(tickers, conn):
                 conn.commit()
                 cursor.close()
 
-def clean_employment_years(year_start, year_end):
+def clean_years(year_start, year_end):
     """
     Cleans employment years, converting 'present' to current year
     """
@@ -373,7 +374,7 @@ def insert_employment_history(alumni_id, employment_dict, conn):
     company_name = employment_dict.get('company_name', None)
     year_start = employment_dict.get('year_start', None)
     year_end = employment_dict.get('year_end', None)
-    year_start, year_end = clean_employment_years(year_start, year_end)
+    year_start, year_end = clean_years(year_start, year_end)
     compensation = employment_dict.get('compensation', None)
     location = employment_dict.get('location', None)
     if company_name is None:
@@ -402,7 +403,7 @@ def update_employment_history(alumni_id, employment_dict, conn):
     """
     year_start = employment_dict.get('year_start', None)
     year_end = employment_dict.get('year_end', None)
-    year_start, year_end = clean_employment_years(year_start, year_end)
+    year_start, year_end = clean_years(year_start, year_end)
     compensation = employment_dict.get('compensation', None)
     location = employment_dict.get('location', None)
     company_name = employment_dict.get('company_name', None)

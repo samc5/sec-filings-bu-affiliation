@@ -5,7 +5,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from sec_filings.database import postgres_connect, search_buid, clean_relationship, clean_employment_years, init_schema
+from sec_filings.database import postgres_connect, search_buid, clean_relationship, clean_years, init_schema
 import psycopg
 from datetime import datetime
 
@@ -429,15 +429,15 @@ def test_populate_companies(schema_conn):
     cur.close()
 
 
-# clean_employment_years
+# clean_years
 # (present, present), (present, null), (null present), (null, null), (2010, present), (2008, 2020), (None, None), (2010, None), (None, 2018)
 # tests/test_database_connection.py
-def test_clean_employment_years():
+def test_clean_years():
     year = datetime.now().year
     test_list = [("present", "present"), ("present", "null"), ("null", "present"), ("null", "null"), (2010, "present"), (2008, 2020), (None, None), (2010, None), (None, 2018), ("2010", "2017")]
     res = []
     for item in test_list:
-        res.append(clean_employment_years(item[0], item[1]))
+        res.append(clean_years(item[0], item[1]))
     correct_results = [(None, 2025), (None, None), (None, 2025), (None, None), (2010, 2025), (2008, 2020), (None, None), (2010, None), (None, 2018), (2010, 2017)]
     assert res == correct_results
 
